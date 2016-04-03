@@ -43,7 +43,7 @@ or just use a view function to act as a websocket server:
 
 ## Client
 
-The client is standalone. it's a very simple implemetation, using the old-good socket library. And ssl is not supported currently.
+The client is standalone. it's a very simple implementation, using the old-good socket library. SSL is not supported currently.
 
 	from flaskws import ws_connect
 
