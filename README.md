@@ -3,7 +3,19 @@
 
 ## Server
 
-### define a websocket server entry
+### 1. setup middleware
+
+```python
+
+	from flaskws import WsMiddleware
+
+	app = Flask(__name__, template_folder='templates')
+	app.wsgi_app = WsMiddleware(app.wsgi_app)
+	# app.run()
+
+```
+
+### 2. define a websocket server
 
 create a "Sever" class like this:
 
@@ -27,7 +39,7 @@ create a "Sever" class like this:
 		def on_close(self, ws_sock): pass
 ```
 
-or just use a view function to act as a websocket server:
+**Or** just use a view function to act as a websocket server:
 
 ```python
 
