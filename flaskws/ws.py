@@ -126,16 +126,29 @@ class WsSocket(object):
         except WsCommunicationError:
             self.close()
 
-    def recv(self, timeout=5.0):
+    def recv(self, timeout=5.0, allow_fragments=True):
         '''public recv(timeout=5.0)'''
         if self.evt_close.is_set():
             raise WsError(u'websocket closed.')
         t0 = time.time()
+        _op, _buff = None, None
         while t0 + timeout >= time.time():
             try:
                 frame = self.q_recv.get(False, 0.05)
-                if frame:
-                    return frame
+                if frame:                    
+                    if allow_fragments:
+                        return frame
+                    else:
+                        fin, op, msg = frame
+                        if fin and not _buff:
+                            return frame
+                        elif not _buff:
+                            _op = op
+                            _buff = StringIO()
+                            _buff.write(msg)
+                        if fin:
+                            _buff.write(msg)
+                            return fin, _op, _buff.getvalue()
             except Empty:
                 pass
 
