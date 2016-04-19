@@ -5,7 +5,6 @@ import hashlib
 import base64
 import functools
 import struct
-import select
 import time
 import json
 import socket
@@ -18,9 +17,53 @@ from threading import Thread, Event
 from Queue import Queue, Empty
 from defs import *
 from protocol import parse_frame, make_frame
+from utils import r_select
+
+try:
+    import uwsgi
+except ImportError:
+    uwsgi = None
+
+try:
+    import tornado
+    from tornado.iostream import StreamClosedError
+except ImportError:
+    tornado = None
+    StreamClosedError = None
+
+class _BaseWsSock(object):
+
+    def _handshake(self, environ, start_response):
+        connection = environ.get('HTTP_CONNECTION', '')
+        upgrade = environ.get('HTTP_UPGRADE', '')
+        if connection.lower() != 'upgrade':
+            return False
+        elif upgrade.lower() != 'websocket':
+            return False
+        key = environ.get('HTTP_SEC_WEBSOCKET_KEY', '')
+        if not key:
+            return False
+        protocol = environ.get('HTTP_SEC_WEBSOCKET_PROTOCOL', '')
+        version = environ.get('HTTP_SEC_WEBSOCKET_VERSION', '')
+        # ---
+        key_hash = '%s%s' % (key, ws_uid)
+        key_hash = base64.b64encode(hashlib.sha1(key_hash).digest())
+        # ---
+        headers = [('upgrade', 'websocket'),
+                   ('connection', 'upgrade'),
+                   ('sec-websocket-accept', key_hash),
+                   ('x-handshake-by', '_BaseWsSock'),
+                   #  ('sec-websocket-protocol', 'chat'),
+                   ]
+        start_response('101 Switching protocols', headers)
+        return True
+
+    def html(self, environ, start_response):
+        start_response('400 this is a websocket server.', {})
+        yield 'BAD REQUEST: this is a websocket server.'
 
 
-class WsSocket(object):
+class WsSocket(_BaseWsSock):
 
     def __init__(self, environ, handler, values):
         self.environ = environ
@@ -41,33 +84,8 @@ class WsSocket(object):
         self.evt_open = Event()
         self.evt_close = Event()
 
-    def html(self, environ, start_response):
-        start_response('400 this is a websocket server.', {})
-        yield 'BAD REQUEST: this is a websocket server.'
-
     def handshake(self, environ, start_response):
-        connection = environ.get('HTTP_CONNECTION', '')
-        upgrade = environ.get('HTTP_UPGRADE', '')
-        if connection.lower() != 'upgrade':
-            return False
-        elif upgrade.lower() != 'websocket':
-            return False
-        key = environ.get('HTTP_SEC_WEBSOCKET_KEY', '')
-        if not key:
-            return False
-        protocol = environ.get('HTTP_SEC_WEBSOCKET_PROTOCOL', '')
-        version = environ.get('HTTP_SEC_WEBSOCKET_VERSION', '')
-        # ---
-        key_hash = '%s%s' % (key, ws_uid)
-        key_hash = base64.b64encode(hashlib.sha1(key_hash).digest())
-        # ---
-        headers = [('upgrade', 'websocket'),
-                   ('connection', 'upgrade'),
-                   ('sec-websocket-accept', key_hash),
-                   #  ('sec-websocket-protocol', 'chat'),
-                   ]
-        start_response('101 Switching protocols', headers)
-        return True
+        return super(WsSocket, self)._handshake(environ, start_response)
 
     def _frame(self, fin, op, payload, mask=False):
         return make_frame(fin, op, payload, mask=mask)
@@ -89,6 +107,10 @@ class WsSocket(object):
     def _recv(self, timeout=5.0):
         if self.evt_close.is_set() or not self.f:
             raise WsError(u'websocket closed.')
+        # print '----------- _recv ------------'
+        # print self.f
+        # print type(self.f)
+        # print dir(self.f)
         t0, f = time.time(), None
         while not self.evt_close.is_set():
             if hasattr(self.f, 'readable'):
@@ -97,7 +119,7 @@ class WsSocket(object):
                 #     time.sleep(timeout)
                 r = [self.f]
             else:
-                r, _, _ = select.select([self.f], [], [], timeout)
+                r = r_select([self.f], timeout=timeout)
             if not r:
                 time.sleep(0.05)
                 if time.time() - timeout > t0:
@@ -126,16 +148,29 @@ class WsSocket(object):
         except WsCommunicationError:
             self.close()
 
-    def recv(self, timeout=5.0):
+    def recv(self, timeout=5.0, allow_fragments=True):
         '''public recv(timeout=5.0)'''
         if self.evt_close.is_set():
             raise WsError(u'websocket closed.')
         t0 = time.time()
+        _op, _buff = None, None
         while t0 + timeout >= time.time():
             try:
                 frame = self.q_recv.get(False, 0.05)
-                if frame:
-                    return frame
+                if frame:                    
+                    if allow_fragments:
+                        return frame
+                    else:
+                        fin, op, msg = frame
+                        if fin and not _buff:
+                            return frame
+                        elif not _buff:
+                            _op = op
+                            _buff = StringIO()
+                            _buff.write(msg)
+                        if fin:
+                            _buff.write(msg)
+                            return fin, _op, _buff.getvalue()
             except Empty:
                 pass
 
@@ -223,36 +258,324 @@ class WsSocket(object):
                 th.join()
 
 
+class UwsgiWsSock(_BaseWsSock):
+
+    def __init__(self, environ, *args):
+        self.environ = environ
+        self.evt_open = Event()
+        self.evt_close = Event()
+        self.q = Queue()
+        self.q_recv = Queue()
+
+    def handshake(self, environ, start_response):
+        # key = environ.get('HTTP_SEC_WEBSOCKET_KEY', '')
+        # origin = environ.get('HTTP_ORIGIN', '')
+        # uwsgi.websocket_handshake(key, origin)
+        # return True
+        return super(UwsgiWsSock, self)._handshake(environ, start_response)
+
+    def close(self):
+        if not self.evt_close.is_set():
+            self.evt_close.set()
+
+    def send_json(self, v, fin=True, op=OP_TEXT, mask=False):
+        if isinstance(v, unicode) or isinstance(v, str):
+            return self.send(v)
+        else:
+            return self.send(json.dumps(v))
+
+    def send(self, data, fin=True, op=OP_TEXT, mask=False):
+        '''public send(data)'''
+        if not self.evt_close.is_set():
+            self.q.put(data)
+        else:
+            raise WsError(u'websocket closed.')
+
+    def recv(self, timeout=5.0, **kargs):
+        t0 = time.time()
+        while not self.evt_close.is_set():
+            try:
+                msg = self.q_recv.get(False, 0.1)
+                if msg:
+                    return (1, OP_TEXT, msg)
+                if to + timeout > time.time():
+                    return
+            except Empty:
+                pass
+
+    def serve_handler(self, handler, values):
+        def invoke_handler(handler, sock):
+            try:
+                handler(sock, **values)
+            finally:
+                sock.close()
+        th = Thread(target=invoke_handler, args=(handler, self,))
+        th.setDaemon(True)
+        th.start()
+        try:
+            fd = uwsgi.connection_fd()
+            while not self.evt_close.is_set():
+                uwsgi.wait_fd_read(fd, 0.3)
+                uwsgi.suspend()
+                _fd = uwsgi.ready_fd()
+                msg = uwsgi.websocket.recv_nb()
+                if msg:
+                    self.q_recv.put(msg)
+                try:
+                    msg = self.q.get(False, 0.1)
+                    if msg:
+                        uwsgi.websocket_send(msg)
+                except Empty:
+                    pass
+        finally:
+            self.close()
+            th.join()
+        return []
+
+    def server(self, server):
+        if not server:
+            raise ValueError('server instance required.')
+        def recv(server, sock):
+            while not sock.evt_open.is_set():
+                time.sleep(0.05)
+            if hasattr(server, 'on_open'):
+                server.on_open(self)
+            try:
+                fd = uwsgi.connection_fd()
+                while not sock.evt_close.is_set():
+                    uwsgi.wait_fd_read(fd, 1.0)
+                    uwsgi.suspend()
+                    _fd = uwsgi.ready_fd()
+                    msg = uwsgi.websocket_recv_nb()
+                    if msg:
+                        frame = (1, OP_TEXT, msg)
+                        server.on_message(sock, frame)
+            finally:
+                sock.evt_close.set()
+        th = None
+        if hasattr(server, 'on_message'):
+            th = Thread(target=recv, args=(server, self,))
+            th.setDaemon(True)
+            th.start()
+        #yield self._frame(True, OP_PING, '')
+        # uwsgi.websocket_send('')
+        self.evt_open.set()
+        try:
+            while not self.evt_close.is_set():
+                try:
+                    msg = self.q.get(False, 0.1)
+                    if msg:
+                        uwsgi.websocket_send(msg)
+                except Empty:
+                    pass
+        finally:
+            sock.evt_close.set()
+            if hasattr(server, 'on_close'):
+                server.on_close(self)
+            if th:
+                th.join()
+        return []
+
+    
 class WsDeliver(Exception):
 
     def __init__(self, response):
         self.response = response
 
 
+class TornadoWebSocketAdapter(object):
+
+    def __init__(self, app, request):
+        self.app = app
+        self.request = request
+        self.evt_close = threading.Event()
+        self.f = None
+        self.q_recv = None
+
+    def html(self):
+        f = self.request.connection.detach()
+        resp = ['HTTP/1.1 403 handshake fail', '', '']
+        f.write('\r\n'.join(resp))
+        f.close()
+        return self
+
+    def fail(self):
+        f = self.request.connection.detach()
+        resp = ['HTTP/1.1 400 handshake fail', '', '']
+        f.write('\r\n'.join(resp))
+        f.close()
+        return self
+
+    def handshake(self):
+        request = self.request
+        headers = request.headers
+        h_upgrade = headers.get('upgrade', '').lower()
+        h_connection = headers.get('connection', '').lower().split(',')
+        h_key = headers.get('sec-websocket-key', '')
+        if h_upgrade != 'websocket':
+            self.fail()
+            return
+        elif 'upgrade' not in h_connection:
+            self.fail()
+            return
+        elif not h_key:
+            self.fail()
+            return
+        # -- handshake
+        protocol = headers.get('sec-websocket-protocol', '')
+        version = headers.get('sec-websocket-version', '')
+        key_hash = '%s%s' % (h_key, ws_uid)
+        key_hash = base64.b64encode(hashlib.sha1(key_hash).digest())
+        _headers = [('upgrade', 'websocket'),
+                    ('connection', 'upgrade'),
+                    ('sec-websocket-accept', key_hash),
+                    ('x-handshake-by', '_BaseWsSock'),]
+        f = request.connection.detach()
+        self.f = f
+        f.set_close_callback(self.on_connection_close)
+        resp = ['HTTP/1.1 101 Switching protocols']
+        resp.extend([': '.join(h) for h in _headers])
+        resp.extend(['', ''])
+        f.write('\r\n'.join(resp))
+        # f.write(make_frame(1, OP_PING, ''))
+        # f.write(make_frame(1, OP_TEXT, 'hello from tornado!'))        
+        return True
+
+    # --------------------
+    # for flask view
+    # --------------------
+
+    def handle(self, handler, values):
+        self.q_recv = Queue()
+        f = self.f
+        th = threading.Thread(target=self._recv, 
+                              args=(f,))
+        th.setDaemon(True)
+        th.start()
+        th_h = threading.Thread(target=self._handler, 
+                                args=(handler, values))
+        th_h.setDaemon(True)
+        th_h.start()
+        return self
+
+    def _handler(self, handler, values):
+        handler(self, values)
+        self._abort()
+
+    def _recv(self, f):
+        while not self.evt_close.is_set():
+            frame = None
+            try:
+                frame = parse_frame(f)
+            except StreamClosedError:
+                break
+            if not frame:
+                continue
+            self.q_recv.put(frame)
+        self._abort()
+
+    def recv(self, timeout=5.0):
+        if self.evt_close.is_set():
+            return
+        t0 = time.time()
+        while not self.evt_close.is_set():
+            try:
+                frame = self.q_recv.get(False, 0.1)
+                if frame:
+                    return frame
+                if t0 + timeout > time.time():
+                    return
+            except Empty:
+                pass
+
+    # --------------------
+    # for server class
+    # --------------------
+
+    def server(self, server):
+        th = threading.Thread(target=self._recv_for_server, 
+                              args=(self.f, server))
+        th.setDaemon(True)
+        th.start()
+        return self
+
+    def _recv_for_server(self, f, server):
+        if hasattr(server, 'on_open'):
+            server.on_open(self)
+        while not self.evt_close.is_set():
+            frame = None
+            try:
+                frame = parse_frame(f)
+            except StreamClosedError:
+                break
+            if not frame:
+                continue
+            if hasattr(server, 'on_message'):
+                server.on_message(self, frame)
+        if hasattr(server, 'on_close'):
+            server.on_close(self)
+        self._abort()
+
+    # --------------------
+
+    def send_json(self, v, fin=True, op=OP_TEXT):
+        if isinstance(v, unicode) or isinstance(v, str):
+            return self.send(v)
+        else:
+            return self.send(json.dumps(v))
+
+    def send(self, msg, fin=True, op=OP_TEXT):
+        if self.evt_close.is_set():
+            return
+        frame = make_frame(fin, op, msg or '')
+        try:
+            self.f.write(frame)
+        except StreamClosedError:
+            self._abort()
+
+    def on_connection_close(self):
+        self._abort()
+
+    def _abort(self):
+        if not self.evt_close.is_set():
+            self.evt_close.set()
+        if self.f:
+            self.f.close()
+            self.f = None
+
+    
 class WsMiddleware(object):
 
-    def __init__(self, wsgi_app, *args):
+    def __init__(self, wsgi_app, *args, **kargs):
         self.wsgi_app = wsgi_app
         self.app = args[0] if args else None
         self.wss = args[1] if len(args) > 1 else None
+        self.use_tornado = kargs.get('use_tornado', False)
 
     def __call__(self, environ, start_response):
-        if self.wss and self.app:
-            adapter = self.wss.map.bind_to_environ(environ)
-            try:
-                handler, values = adapter.match()
-                sock = WsSocket(environ, handler, values)
-                if sock.handshake(environ, start_response):
-                    return sock()
-                else:
-                    return sock.html(environ, start_response)
-            except NotFound:
-                pass
+        # if self.wss and self.app:
+        #     adapter = self.wss.map.bind_to_environ(environ)
+        #     try:
+        #         handler, values = adapter.match()
+        #         sock = WsSocket(environ, handler, values)
+        #         if sock.handshake(environ, start_response):
+        #             return sock()
+        #         else:
+        #             return sock.html(environ, start_response)
+        #     except NotFound:
+        #         pass
         try:
             return self.wsgi_app(environ, start_response)
         except WsDeliver, e:
+            if uwsgi:
+                key = environ.get('HTTP_SEC_WEBSOCKET_KEY', '')
+                origin = environ.get('HTTP_ORIGIN', '')
+                origin = ''
+                print key
+                print origin
+                uwsgi.websocket_handshake(key, origin)
             resp = e.response
-            return resp.run(environ, start_response)
+            return resp.run(environ, start_response, self.use_tornado)
 
 
 class WsServer(object):
@@ -281,7 +604,18 @@ class WsResponse(object):
         self.handler = handler
         self.values = kargs
 
-    def run(self, environ, start_response):
+    def run(self, environ, start_response, use_tornado=False):
+        if use_tornado:
+            _t_app = environ['x.tornado.app']
+            _t_request = environ['x.tornado.request']
+            sock = TornadoWebSocketAdapter(_t_app, _t_request)
+            if sock.handshake():
+                return sock.handle(self.handler, self.values)
+            else:
+                return sock.html()
+        if uwsgi:
+            sock = UwsgiWsSock(environ)
+            return sock.serve_handler(self.handler, self.values)
         sock = WsSocket(environ, self.handler, self.values)
         if sock.handshake(environ, start_response):
             return sock()
@@ -298,7 +632,21 @@ class WsResponseForServer(object):
         self.server_cls = server_cls
         self.values = kargs
 
-    def run(self, environ, start_response):
+    def run(self, environ, start_response, use_tornado):
+        if use_tornado:
+            _t_app = environ['x.tornado.app']
+            _t_request = environ['x.tornado.request']
+            sock = TornadoWebSocketAdapter(_t_app, _t_request)
+            if sock.handshake():
+                return sock.server(self.server_cls(sock, **self.values))
+            else:
+                return sock.html()
+        if uwsgi:
+            # key = environ.get('HTTP_SEC_WEBSOCKET_KEY', '')
+            # origin = environ.get('HTTP_ORIGIN', '')
+            # uwsgi.websocket_handshake(key, origin)
+            sock = UwsgiWsSock(environ)
+            return sock.server(self.server_cls(sock, **self.values))
         sock = WsSocket(environ, None, None)
         if sock.handshake(environ, start_response):
             return sock.server(self.server_cls(sock, **self.values))

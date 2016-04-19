@@ -5,6 +5,12 @@ import struct
 from cStringIO import StringIO
 from defs import *
 
+try:
+    import tornado
+    from tornado.iostream import IOStream
+except ImportError:
+    tornado = None
+
 
 def _read_next_frame(f):
     h = f.read(2)
@@ -39,6 +45,8 @@ def _read_next_frame(f):
 def parse_frame(data):
     if isinstance(data, str):
         f = StrReader(data)
+    elif tornado and isinstance(data, IOStream):
+        f = BlockedReader(data)
     else:
         f = data # 
         # f = PromisedReader(data)

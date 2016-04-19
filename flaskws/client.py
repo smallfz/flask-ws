@@ -7,11 +7,11 @@ import urllib, urlparse
 import hashlib
 import threading
 import Queue
-import cStringIO
+from cStringIO import StringIO
 import base64
-import select
 from defs import *
 from protocol import parse_frame, make_frame
+from utils import r_select
 
 
 class _Client(object):
@@ -87,9 +87,9 @@ class _Client(object):
         headers_str = crlf.join(['%s: %s' % (k,v) for k,v in headers])
         sock.send(headers_str)
         sock.send(crlf + crlf)
-        buff = cStringIO.StringIO()
+        buff = StringIO()
         while not self.evt_abort.is_set():
-            r, _, _ = select.select([sock], [], [], 0.5)
+            r = r_select([sock], timeout=0.5)
             if not r:
                 if t0 + timeout < time.time():
                     return False
@@ -119,22 +119,40 @@ class _Client(object):
             self.f = sock.makefile()
             return True
 
-    def recv(self, timeout=5.0):
-        return self._recv_next(timeout=timeout)
+    def recv(self, timeout=5.0, allow_fragments=True):
+        _op, _buff = None, None
+        while not self.evt_abort.is_set():
+            frame = self._recv_next(timeout=timeout)
+            if frame:
+                fin, op, payload = frame
+                if not allow_fragments:
+                    if fin and not _buff:
+                        return frame
+                    if not fin:
+                        if not _buff:
+                            _op = op
+                            _buff = StringIO()
+                    _buff.write(payload)
+                    if fin:
+                        return fin, _op, _buff.getvalue()
+                    else:
+                        continue
+            return frame
 
     def _recv_next(self, timeout=5.0):
+        _op, _buff = None, None
         t0 = time.time()
         while t0 + timeout >= time.time() and not self.evt_abort.is_set():
             if not self.f:
                 time.sleep(0.1)
                 continue
-            r, _, _ = select.select([self.f], [], [], 0.1)
+            r = r_select([self.f], timeout=0.1)
             if not r:
                 continue
             f = r[0]
             try:
-                fin, op, payload = parse_frame(f)
-                return (fin, op, payload)
+                frame = parse_frame(f)
+                return frame
             except (IOError, AttributeError, socket.error):
                 self.close()
                 # raise WsCommunicationError()

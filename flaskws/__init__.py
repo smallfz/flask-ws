@@ -9,3 +9,4 @@ from ws import ws_server, ws_server_view
 
 from client import ws_connect
 
+from wsgi import WsWSGIContainer

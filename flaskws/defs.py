@@ -1,5 +1,6 @@
 #-*- coding: utf-8 -*-
 
+import time
 import threading
 from cStringIO import StringIO
 
@@ -132,3 +133,27 @@ class PromisedReader(object):
 
     def __exit__(self, *args, **kargs):
         self.close()
+
+
+class BlockedReader(object):
+    '''convert a tornado stream to a blocked reader'''
+
+    def __init__(self, f):
+        self.f = f
+        self.data = ''
+        self.evt_ready = threading.Event()
+
+    def _on_ready(self, data):
+        if data:
+            self.data += data
+        self.evt_ready.set()
+
+    def read(self, size, timeout=5.0):
+        self.data = ''
+        while True:
+            self.evt_ready.clear()
+            self.f.read_bytes(size, self._on_ready)
+            self.evt_ready.wait()
+            if len(self.data) >= size:
+                break
+        return self.data
