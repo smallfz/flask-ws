@@ -3,9 +3,23 @@
 
 ## Server
 
-### define a websocket server entry
+### 1. setup middleware
+
+```python
+
+	from flaskws import WsMiddleware
+
+	app = Flask(__name__, template_folder='templates')
+	app.wsgi_app = WsMiddleware(app.wsgi_app)
+	# app.run()
+
+```
+
+### 2. define a websocket server
 
 create a "Sever" class like this:
+
+```python
 
 	from flaskws import ws_server, WsError, OP_TEXT
 	
@@ -23,9 +37,11 @@ create a "Sever" class like this:
 			fin, op, payload = frame
 
 		def on_close(self, ws_sock): pass
+```
 
+**Or** just use a view function to act as a websocket server:
 
-or just use a view function to act as a websocket server:
+```python
 
 	from ws import ws_server_view
 
@@ -41,9 +57,13 @@ or just use a view function to act as a websocket server:
 					if msg == 'close':
 						break
 
+```
+
 ## Client
 
 The client is standalone. it's a very simple implementation, using the old-good socket library. SSL is not supported currently.
+
+```python
 
 	from flaskws import ws_connect
 
@@ -53,3 +73,4 @@ The client is standalone. it's a very simple implementation, using the old-good 
 			for frame in c:
 				print frame
 
+```

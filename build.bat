@@ -1,1 +1,1 @@
-python setup.py bdist --format=wininst
+python setup.py bdist --format=wininst,zip,gztar
