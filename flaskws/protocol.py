@@ -12,9 +12,15 @@ except ImportError:
     tornado = None
 
 
+def _unpack(pt, data):
+    size = struct.calcsize(pt)
+    if (len(data) if data else 0) >= size:
+        return struct.unpack(pt, data)
+    raise WsIOError()
+
 def _read_next_frame(f):
     h = f.read(2)
-    b0, plen = struct.unpack('>BB', h)
+    b0, plen = _unpack('>BB', h)
     fin = b0 >> 7
     op = b0 & 0b1111
     mask = plen >> 7
@@ -22,20 +28,20 @@ def _read_next_frame(f):
     if plen <= 125:
         pass
     elif plen == 126:
-        plen = struct.unpack('>H', f.read(2))[0]
+        plen = _unpack('>H', f.read(2))[0]
     elif plen == 127:
-        plen = struct.unpack('>I', f.read(4))[0]
+        plen = _unpack('>I', f.read(4))[0]
     mask_key = []
     if mask:
         mask_key = f.read(4)
-        mask_key = struct.unpack('>BBBB', mask_key)
+        mask_key = _unpack('>BBBB', mask_key)
     payload = f.read(plen)
     if payload and mask and mask_key:
         _m = mask_key
         payload = [ord(c) ^ _m[i%len(_m)] for i, c in enumerate(payload)]
         payload = ''.join(map(chr, payload))
     if op == OP_CLOSE:
-        pass
+        raise WsClosedByRemote()
     elif op == OP_PONG:
         pass
     elif op == OP_PING:

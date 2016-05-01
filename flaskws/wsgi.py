@@ -41,7 +41,7 @@ class WsWSGIContainer(WSGIContainer):
             if 'content-length' not in _hkeys:
                 _headers.append(('content-length', '%d' % len(body)))
             if 'content-type' not in _hkeys:
-                _headers.append(('content-length', 'text/plain; charset=utf-8'))
+                _headers.append(('content-type', 'text/plain; charset=utf-8'))
         line0 = httputil.ResponseStartLine('http/1.1', code, reason)
         headers = httputil.HTTPHeaders()
         for k, v in _headers:

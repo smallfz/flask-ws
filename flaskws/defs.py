@@ -19,8 +19,8 @@ OP_PONG = 0xA
 
 class WsError(Exception):
     
-    def __init__(self, msg):
-        self.msg = msg
+    def __init__(self, *args):
+        self.msg = args[0] if args else None
 
     def __str__(self):
         if self.msg:
@@ -35,10 +35,10 @@ class WsTimeout(WsError):
         self.msg = args[0] if args else None
 
 
-class WsCommunicationError(Warning):
+class WsIOError(WsError): pass
 
-    def __init__(self, *args):
-        self.msg = args[0] if args else None
+
+class WsClosedByRemote(Warning): pass
 
 
 class HTTPError(Exception):
@@ -152,7 +152,10 @@ class BlockedReader(object):
         self.data = ''
         while True:
             self.evt_ready.clear()
-            self.f.read_bytes(size, self._on_ready)
+            try:
+                self.f.read_bytes(size, self._on_ready)
+            except:
+                raise WsIOError()
             self.evt_ready.wait()
             if len(self.data) >= size:
                 break

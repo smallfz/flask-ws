@@ -153,7 +153,7 @@ class _Client(object):
             try:
                 frame = parse_frame(f)
                 return frame
-            except (IOError, AttributeError, socket.error):
+            except (IOError, AttributeError, socket.error, WsIOError):
                 self.close()
                 # raise WsCommunicationError()
 

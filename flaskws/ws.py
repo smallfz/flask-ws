@@ -129,15 +129,17 @@ class WsSocket(_BaseWsSock):
                 break
         try:
             fin, op, payload = parse_frame(f)
+            if op == OP_CLOSE:
+                self.close()
+            elif op == OP_PING:
+                pong = self._frame(True, OP_PONG, '')
+                self.q_frame.put(pong)
+            return fin, op, payload
         except (IOError, AttributeError, socket.error):
-            raise WsCommunicationError()
-        if op == OP_CLOSE:
-            self.close()
-        elif op == OP_PING:
-            pong = self._frame(True, OP_PONG, '')
-            self.q_frame.put(pong)
-        return fin, op, payload
-
+            raise
+        except WsClosedByRemote:
+            raise
+        
     def _recv_to_q(self, timeout=0.5):
         try:
             fin, op, data = self._recv(timeout=timeout)
@@ -145,7 +147,7 @@ class WsSocket(_BaseWsSock):
                 self.q_recv.put((fin, op, data))
         except WsTimeout:
             pass
-        except WsCommunicationError:
+        except (WsIOError, WsClosedByRemote):
             self.close()
 
     def recv(self, timeout=5.0, allow_fragments=True):
@@ -467,7 +469,9 @@ class TornadoWebSocketAdapter(object):
             frame = None
             try:
                 frame = parse_frame(f)
-            except StreamClosedError:
+            except (StreamClosedError, WsIOError):
+                break
+            except WsClosedByRemote:
                 break
             if not frame:
                 continue
@@ -506,7 +510,9 @@ class TornadoWebSocketAdapter(object):
             frame = None
             try:
                 frame = parse_frame(f)
-            except StreamClosedError:
+            except (StreamClosedError, WsIOError):
+                break
+            except WsClosedByRemote:
                 break
             if not frame:
                 continue
@@ -519,7 +525,7 @@ class TornadoWebSocketAdapter(object):
     # --------------------
 
     def send_json(self, v, fin=True, op=OP_TEXT):
-        if isinstance(v, unicode) or isinstance(v, str):
+        if isinstance(v, (unicode, str)):
             return self.send(v)
         else:
             return self.send(json.dumps(v))
@@ -529,9 +535,14 @@ class TornadoWebSocketAdapter(object):
             return
         frame = make_frame(fin, op, msg or '')
         try:
-            self.f.write(frame)
-        except StreamClosedError:
+            if self.f and not self.f.closed():
+                self.f.write(frame)
+        except (StreamClosedError, WsIOError):
             self._abort()
+
+    def close(self):
+        self.send('', op=OP_CLOSE)
+        self._abort()
 
     def on_connection_close(self):
         self._abort()
@@ -540,7 +551,8 @@ class TornadoWebSocketAdapter(object):
         if not self.evt_close.is_set():
             self.evt_close.set()
         if self.f:
-            self.f.close()
+            if not self.f.closed():
+                self.f.close()
             self.f = None
 
     
