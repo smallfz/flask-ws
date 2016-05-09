@@ -185,8 +185,26 @@ class WsSocket(_BaseWsSock):
     def send(self, data, fin=True, op=OP_TEXT, mask=False):
         '''public send(data)'''
         if not self.evt_close.is_set():
-            frame = self._frame(1 if fin else 0, op, data, mask=mask)
-            self.q_frame.put(frame)
+            size = len(data)
+            sub_f_size = MAX_FRAME_SIZE
+            if fin and (size > sub_f_size):
+                cur = 0
+                while True:
+                    part = data[cur: cur + sub_f_size]
+                    if not part:
+                        break
+                    _fin = 0
+                    if cur + len(part) >= size:
+                        _fin = 1
+                    _op = op
+                    if cur > 0:
+                        _op = 0
+                    frame = self._frame(_fin, _op, part, mask=mask)
+                    self.q_frame.put(frame)
+                    cur += len(part)
+            else:
+                frame = self._frame(1 if fin else 0, op, data, mask=mask)
+                self.q_frame.put(frame)
         else:
             raise WsError(u'websocket closed.')
 

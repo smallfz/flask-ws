@@ -168,9 +168,28 @@ class _Client(object):
     def send(self, data, fin=True, op=OP_TEXT, mask=True):
         if self.evt_abort.is_set() or not self.f:
             raise WsError('websocket was closed.')
-        frame = make_frame(fin, op, data, mask=mask)
-        self.f.write(frame)
-        self.f.flush()
+        sub_f_size = MAX_FRAME_SIZE
+        size = len(data)
+        if fin and (size > sub_f_size):
+            cur = 0
+            while True:
+                part = data[cur: cur + sub_f_size]
+                if not part:
+                    break
+                _fin = 0
+                if cur + len(part) >= size:
+                    _fin = 1
+                _op = op
+                if cur > 0:
+                    _op = 0
+                frame = make_frame(_fin, _op, part, mask=mask)
+                self.f.write(frame)
+                cur += len(part)
+            self.f.flush()
+        else:
+            frame = make_frame(fin, op, data, mask=mask)
+            self.f.write(frame)
+            self.f.flush()
 
     def close(self):
         if not self.evt_abort.is_set():
