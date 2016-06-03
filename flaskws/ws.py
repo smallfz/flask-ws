@@ -405,7 +405,8 @@ class WsDeliver(Exception):
 
 class TornadoWebSocketAdapter(object):
 
-    def __init__(self, app, request):
+    def __init__(self, environ, app, request):
+        self.environ = environ
         self.app = app
         self.request = request
         self.evt_close = threading.Event()
@@ -638,7 +639,7 @@ class WsResponse(object):
         if use_tornado:
             _t_app = environ['x.tornado.app']
             _t_request = environ['x.tornado.request']
-            sock = TornadoWebSocketAdapter(_t_app, _t_request)
+            sock = TornadoWebSocketAdapter(environ, _t_app, _t_request)
             if sock.handshake():
                 return sock.handle(self.handler, self.values)
             else:
@@ -666,7 +667,7 @@ class WsResponseForServer(object):
         if use_tornado:
             _t_app = environ['x.tornado.app']
             _t_request = environ['x.tornado.request']
-            sock = TornadoWebSocketAdapter(_t_app, _t_request)
+            sock = TornadoWebSocketAdapter(environ, _t_app, _t_request)
             if sock.handshake():
                 return sock.server(self.server_cls(sock, **self.values))
             else:
