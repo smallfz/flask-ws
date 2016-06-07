@@ -34,9 +34,11 @@ except ImportError:
 class _BaseWsSock(object):
 
     def _handshake(self, environ, start_response):
-        connection = environ.get('HTTP_CONNECTION', '')
+        connection = environ.get('HTTP_CONNECTION', '') or ''
+        connection = connection.lower().split(',')
+        connection = [c.strip() for c in connection if c.strip()]
         upgrade = environ.get('HTTP_UPGRADE', '')
-        if connection.lower() != 'upgrade':
+        if 'upgrade' not in connection:
             return False
         elif upgrade.lower() != 'websocket':
             return False
@@ -431,7 +433,9 @@ class TornadoWebSocketAdapter(object):
         request = self.request
         headers = request.headers
         h_upgrade = headers.get('upgrade', '').lower()
-        h_connection = headers.get('connection', '').lower().split(',')
+        h_connection = headers.get('connection', '').lower()
+        h_connection = h_connection.split(',')
+        h_connection = [c.strip() for c in h_connection if c.strip()]
         h_key = headers.get('sec-websocket-key', '')
         if h_upgrade != 'websocket':
             self.fail()
