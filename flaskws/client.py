@@ -83,7 +83,7 @@ class _Client(object):
                    ('origin', origin),
                    ('sec-websocket-version', 13),
                    ('sec-websocket-key', key),)
-        sock.send('GET %s HTTP/1.1%s' % (self.url, crlf))
+        sock.send('GET %s HTTP/1.1%s' % (uri.path, crlf))
         headers_str = crlf.join(['%s: %s' % (k,v) for k,v in headers])
         sock.send(headers_str)
         sock.send(crlf + crlf)
