@@ -95,7 +95,7 @@ class WsSocket(_BaseWsSock):
     def _nextframe(self, interval=0.50):
         while not self.evt_close.is_set():
             try:
-                frame = self.q_frame.get(False, interval)
+                frame = self.q_frame.get(True, interval)
                 if frame:
                     yield frame
             except Empty:
@@ -160,7 +160,7 @@ class WsSocket(_BaseWsSock):
         _op, _buff = None, None
         while t0 + timeout >= time.time():
             try:
-                frame = self.q_recv.get(False, 0.05)
+                frame = self.q_recv.get(True, 0.05)
                 if frame:                    
                     if allow_fragments:
                         return frame
@@ -317,7 +317,7 @@ class UwsgiWsSock(_BaseWsSock):
         t0 = time.time()
         while not self.evt_close.is_set():
             try:
-                msg = self.q_recv.get(False, 0.1)
+                msg = self.q_recv.get(True, 0.1)
                 if msg:
                     return (1, OP_TEXT, msg)
                 if to + timeout > time.time():
@@ -344,7 +344,7 @@ class UwsgiWsSock(_BaseWsSock):
                 if msg:
                     self.q_recv.put(msg)
                 try:
-                    msg = self.q.get(False, 0.1)
+                    msg = self.q.get(True, 0.1)
                     if msg:
                         uwsgi.websocket_send(msg)
                 except Empty:
@@ -385,7 +385,7 @@ class UwsgiWsSock(_BaseWsSock):
         try:
             while not self.evt_close.is_set():
                 try:
-                    msg = self.q.get(False, 0.1)
+                    msg = self.q.get(True, 0.1)
                     if msg:
                         uwsgi.websocket_send(msg)
                 except Empty:
@@ -507,7 +507,7 @@ class TornadoWebSocketAdapter(object):
         t0 = time.time()
         while not self.evt_close.is_set():
             try:
-                frame = self.q_recv.get(False, 0.1)
+                frame = self.q_recv.get(True, 0.1)
                 if frame:
                     return frame
                 if t0 + timeout > time.time():
