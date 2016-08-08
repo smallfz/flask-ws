@@ -537,7 +537,7 @@ class TornadoWebSocketAdapter(object):
                               args=(self.f, server))
         th.setDaemon(True)
         th.start()
-        self.threads.append(th)
+        # self.threads.append(th)
         return self
 
     def _recv_for_server(self, f, server):
@@ -624,6 +624,8 @@ class TornadoWebSocketAdapter(object):
                     continue
                 if th == curr_th:
                     continue
+                if th.is_alive():
+                    pass
                 th.join()
         except IndexError:
             pass
@@ -640,6 +642,15 @@ class WsMiddleware(object):
 
     def __call__(self, environ, start_response):
         logging.debug('WsMiddleware.__call__')
+        # join dead threads
+        curr_th = threading.current_thread()
+        for th in threading.enumerate():
+            if not th or th == curr_th:
+                continue
+            if th.is_alive():
+                continue
+            th.join()
+            logging.debug('thread %s joinned.' % th.name)
         # if self.wss and self.app:
         #     adapter = self.wss.map.bind_to_environ(environ)
         #     try:

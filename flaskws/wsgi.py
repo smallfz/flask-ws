@@ -1,5 +1,6 @@
 #-*- coding: utf-8 -*-
 
+import logging
 import threading
 from tornado.wsgi import WSGIContainer
 from tornado import httputil
@@ -12,6 +13,7 @@ class WsWSGIContainer(WSGIContainer):
         super(WsWSGIContainer, self).__init__(app)
 
     def __call__(self, request):
+        logging.debug('WsWSGIContainer.__call__')
         data = {}
         response = []
         def _start_response(status, headers):

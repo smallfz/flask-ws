@@ -8,7 +8,7 @@ packages = (
     )
 
 setup(name='flask-ws', 
-      version='0.0.1.11', 
+      version='0.0.1.13', 
       packages=packages, 
       description='Websocket for flask.',
       author='smallfz', 
