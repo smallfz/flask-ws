@@ -416,6 +416,7 @@ class TornadoWebSocketAdapter(object):
         self.evt_close = threading.Event()
         self.f = None
         self.q_recv = None
+        self.threads = []
 
     def html(self):
         f = self.request.connection.detach()
@@ -483,6 +484,8 @@ class TornadoWebSocketAdapter(object):
                                 args=(handler, values))
         th_h.setDaemon(True)
         th_h.start()
+        self.threads.append(th)
+        self.threads.append(th_h)
         return self
 
     def _handler(self, handler, values):
@@ -534,6 +537,7 @@ class TornadoWebSocketAdapter(object):
                               args=(self.f, server))
         th.setDaemon(True)
         th.start()
+        self.threads.append(th)
         return self
 
     def _recv_for_server(self, f, server):
@@ -601,13 +605,26 @@ class TornadoWebSocketAdapter(object):
         self._abort()
 
     def _abort(self):
-        logging.info('TornadoWebSocketAdapter._abort()')
+        logging.info('TornadoWebSocketAdapter._abort(): start to clean up')
         if not self.evt_close.is_set():
             self.evt_close.set()
         if self.f:
-            if not self.f.closed():
-                self.f.close()
+            try:
+                if not self.f.closed():
+                    self.f.close()
+            except Exception, e:
+                logging.warn('_abort -> self.f.close()')
+                logging.warn(traceback.format_exc(e))
             self.f = None
+        try:
+            while True:
+                th = self.threads.pop()
+                if not th:
+                    continue
+                th.join()
+        except IndexError:
+            pass
+        logging.info('TornadoWebSocketAdapter._abort(): done cleanning.')
 
     
 class WsMiddleware(object):
