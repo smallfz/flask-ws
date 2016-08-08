@@ -8,6 +8,8 @@ import struct
 import time
 import json
 import socket
+import logging
+import traceback
 from cStringIO import StringIO
 from werkzeug.routing import Map, Rule, NotFound
 from werkzeug.wrappers import Response as BaseResponse
@@ -484,7 +486,11 @@ class TornadoWebSocketAdapter(object):
         return self
 
     def _handler(self, handler, values):
-        handler(self, values)
+        try:
+            handler(self, values)
+        except Exception, e:
+            logging.error('_handler -> handler()')
+            logging.error(traceback.format_exc(e))
         self._abort()
 
     def _recv(self, f):
@@ -495,6 +501,10 @@ class TornadoWebSocketAdapter(object):
             except (StreamClosedError, WsIOError):
                 break
             except WsClosedByRemote:
+                break
+            except Exception, e:
+                logging.error('_recv -> parse_frame(f)')
+                logging.error(traceback.format_exc(e))
                 break
             if not frame:
                 continue
@@ -527,8 +537,7 @@ class TornadoWebSocketAdapter(object):
         return self
 
     def _recv_for_server(self, f, server):
-        if hasattr(server, 'on_open'):
-            server.on_open(self)
+        self._safe_invoke(server, 'on_open', self)
         while not self.evt_close.is_set():
             frame = None
             try:
@@ -537,13 +546,28 @@ class TornadoWebSocketAdapter(object):
                 break
             except WsClosedByRemote:
                 break
+            except Exception, e:
+                logging.error('_recv_for_server -> parse_frame')
+                logging.error(traceback.format_exc(e))
+                break
             if not frame:
                 continue
-            if hasattr(server, 'on_message'):
-                server.on_message(self, frame)
-        if hasattr(server, 'on_close'):
-            server.on_close(self)
+            self._safe_invoke(server, 'on_message', self, frame)
+        self._safe_invoke(server, 'on_close', self)
         self._abort()
+
+    # --------------------
+
+    def _safe_invoke(self, server, method, *args, **kargs):
+        if not server or not method:
+            return
+        if not hasattr(server, method):
+            return
+        try:
+            getattr(server, method)(*args, **kargs)
+        except:
+            logging.error('_safe_invoke: %s()' % method)
+            logging.error(traceback.format_exc(e))
 
     # --------------------
 
@@ -562,15 +586,22 @@ class TornadoWebSocketAdapter(object):
                 self.f.write(frame)
         except (StreamClosedError, WsIOError):
             self._abort()
+        except Exception, e:
+            logging.error('send -> self.f.write(frame)')
+            logging.error(traceback.format_exc(e))
+            self._abort()
 
     def close(self):
+        logging.info('TornadoWebSocketAdapter.close()')
         self.send('', op=OP_CLOSE)
         self._abort()
 
     def on_connection_close(self):
+        logging.info('TornadoWebSocketAdapter.on_connection_close()')
         self._abort()
 
     def _abort(self):
+        logging.info('TornadoWebSocketAdapter._abort()')
         if not self.evt_close.is_set():
             self.evt_close.set()
         if self.f:
@@ -606,8 +637,8 @@ class WsMiddleware(object):
                 key = environ.get('HTTP_SEC_WEBSOCKET_KEY', '')
                 origin = environ.get('HTTP_ORIGIN', '')
                 origin = ''
-                print key
-                print origin
+                # print key
+                # print origin
                 uwsgi.websocket_handshake(key, origin)
             resp = e.response
             return resp.run(environ, start_response, self.use_tornado)
