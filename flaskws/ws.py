@@ -617,9 +617,12 @@ class TornadoWebSocketAdapter(object):
                 logging.warn(traceback.format_exc(e))
             self.f = None
         try:
-            while True:
+            curr_th = threading.current_thread()
+            while self.threads:
                 th = self.threads.pop()
                 if not th:
+                    continue
+                if th == curr_th:
                     continue
                 th.join()
         except IndexError:
@@ -717,12 +720,15 @@ class WsResponseForServer(object):
 
     def run(self, environ, start_response, use_tornado):
         if use_tornado:
+            logging.debug('WsResponseForServer.run(), use_tornado.')
             _t_app = environ['x.tornado.app']
             _t_request = environ['x.tornado.request']
             sock = TornadoWebSocketAdapter(environ, _t_app, _t_request)
             if sock.handshake():
+                logging.debug('WsResponseForServer.run(), handshake ok.')
                 return sock.server(self.server_cls(sock, **self.values))
             else:
+                logging.debug('WsResponseForServer.run(), handshake fail.')
                 return sock.html()
         if uwsgi:
             # key = environ.get('HTTP_SEC_WEBSOCKET_KEY', '')
@@ -737,6 +743,7 @@ class WsResponseForServer(object):
             return sock.html(environ, start_response)
 
     def __call__(self, environ, start_response):
+        logging.debug('WsResponseForServer.__call__: raise deliver')
         raise WsDeliver(self)
 
 
