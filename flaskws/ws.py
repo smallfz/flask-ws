@@ -639,6 +639,7 @@ class WsMiddleware(object):
         self.use_tornado = kargs.get('use_tornado', False)
 
     def __call__(self, environ, start_response):
+        logging.debug('WsMiddleware.__call__')
         # if self.wss and self.app:
         #     adapter = self.wss.map.bind_to_environ(environ)
         #     try:
