@@ -1,7 +1,6 @@
 #-*- coding: utf-8 -*-
 
 import logging
-import threading
 from tornado.wsgi import WSGIContainer
 from tornado import httputil
 from ws import TornadoWebSocketAdapter

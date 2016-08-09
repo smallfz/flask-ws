@@ -420,16 +420,18 @@ class TornadoWebSocketAdapter(object):
 
     def html(self):
         f = self.request.connection.detach()
-        resp = ['HTTP/1.1 403 handshake fail', '', '']
-        f.write('\r\n'.join(resp))
-        f.close()
+        if f:
+            resp = ['HTTP/1.1 403 handshake fail', '', '']
+            f.write('\r\n'.join(resp))
+            f.close()
         return self
 
     def fail(self):
         f = self.request.connection.detach()
-        resp = ['HTTP/1.1 400 handshake fail', '', '']
-        f.write('\r\n'.join(resp))
-        f.close()
+        if f:
+            resp = ['HTTP/1.1 400 handshake fail', '', '']
+            f.write('\r\n'.join(resp))
+            f.close()
         return self
 
     def handshake(self):
@@ -480,10 +482,15 @@ class TornadoWebSocketAdapter(object):
                               args=(f,))
         th.setDaemon(True)
         th.start()
+        pid = os.getpid()
+        tid = th.ident
+        th.setName('ws-%s-handle-recv-%s' % (pid, tid));
         th_h = threading.Thread(target=self._handler, 
                                 args=(handler, values))
         th_h.setDaemon(True)
         th_h.start()
+        tid = th_h.ident
+        th_h.setName('ws-%s-handler-%s' % (pid, tid));
         self.threads.append(th)
         self.threads.append(th_h)
         return self
@@ -533,10 +540,13 @@ class TornadoWebSocketAdapter(object):
     # --------------------
 
     def server(self, server):
+        pid = os.getpid()
         th = threading.Thread(target=self._recv_for_server, 
                               args=(self.f, server))
         th.setDaemon(True)
         th.start()
+        tid = th.ident
+        th.setName('ws-%s-server-recv-%s' % (pid, tid))
         # self.threads.append(th)
         return self
 
