@@ -230,7 +230,8 @@ class WsSocket(_BaseWsSock):
         for frame in self._nextframe():
             if frame:
                 yield frame
-            self._recv_to_q()
+            else:
+                self._recv_to_q()
 
     def __call__(self):
         def invoke_handler(handler, sock):
@@ -651,7 +652,13 @@ class WsMiddleware(object):
         self.wss = args[1] if len(args) > 1 else None
         self.use_tornado = kargs.get('use_tornado', False)
 
-    def __call__(self, environ, start_response):
+    def __call__(self, *args):
+        try:
+            return self._call(*args)
+        finally:
+            pass
+
+    def _call(self, environ, start_response):
         logging.debug('WsMiddleware.__call__')
         # join dead threads
         curr_th = threading.current_thread()
@@ -662,17 +669,6 @@ class WsMiddleware(object):
                 continue
             th.join()
             logging.debug('thread %s joinned.' % th.name)
-        # if self.wss and self.app:
-        #     adapter = self.wss.map.bind_to_environ(environ)
-        #     try:
-        #         handler, values = adapter.match()
-        #         sock = WsSocket(environ, handler, values)
-        #         if sock.handshake(environ, start_response):
-        #             return sock()
-        #         else:
-        #             return sock.html(environ, start_response)
-        #     except NotFound:
-        #         pass
         try:
             return self.wsgi_app(environ, start_response)
         except WsDeliver, e:
@@ -782,3 +778,35 @@ def ws_server(server_cls):
     def wrapper(**kargs):
         return WsResponseForServer(server_cls, **kargs)
     return wrapper
+
+
+# class WsAppDirect(object):
+#     u'''用于直接使用socket实现http服务器io的情形
+#     例如from werkzeug.serving import run_simple'''
+
+#     def __init__(self, server_cls, **kargs):
+#         self.server_cls = server_cls
+#         self.kargs = kargs
+
+#     def __call__(self, environ, start_response):
+#         sock = WsSocket(environ, None, None)
+#         resp = None
+#         if not sock.handshake(environ, start_response):
+#             resp = sock.html(environ, start_response)
+#         else:
+#             print 'handshake ok.'
+#             resp = sock.server(self.server_cls(sock, **self.kargs))
+#         print type(resp)
+#         print resp
+#         for i in resp:
+#             print i
+#             yield i
+#         print '--- done. ---'
+
+# def ws_server_direct(server_cls):
+#     u'''用于直接使用socket实现http服务器io的情形
+#     例如from werkzeug.serving import run_simple'''
+#     @functools.wraps(server_cls)
+#     def wrapper(**kargs):
+#         return WsAppDirect(server_cls, **kargs)
+#     return wrapper
