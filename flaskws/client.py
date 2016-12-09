@@ -14,7 +14,7 @@ from protocol import parse_frame, make_frame
 from utils import r_select
 
 
-class _Client(object):
+class Client(object):
 
     def __init__(self, url, proxies=None):
         self.url = url
@@ -225,7 +225,7 @@ class _Client(object):
 
 
 def ws_connect(*args, **kargs):
-    return _Client(*args, **kargs)
+    return Client(*args, **kargs)
 
 
 if __name__ == '__main__':
