@@ -16,7 +16,7 @@ from utils import r_select
 
 class Client(object):
 
-    def __init__(self, url, proxies=None):
+    def __init__(self, url, proxies=None, allow_fragments=True):
         self.url = url
         self.uri = urlparse.urlparse(url)
         self.scheme = self.uri.scheme.lower()
@@ -29,6 +29,7 @@ class Client(object):
         self.key = ''
         self.status = None
         self.headers = Headers()
+        self.allow_fragments = allow_fragments
 
     def _parse_response(self, resp_header_raw):
         lines = resp_header_raw.split(crlf)
@@ -119,7 +120,9 @@ class Client(object):
             self.f = sock.makefile()
             return True
 
-    def recv(self, timeout=5.0, allow_fragments=True):
+    def recv(self, timeout=5.0, allow_fragments=None):
+        if allow_fragments is None:
+            allow_fragments = self.allow_fragments
         _op, _buff = None, None
         while not self.evt_abort.is_set():
             frame = self._recv_next(timeout=timeout)
