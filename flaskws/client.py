@@ -163,10 +163,12 @@ class Client(object):
     def __iter__(self):
         if not self.f:
             return
-        while not self.evt_abort.is_set():
-            item = self._recv_next()
-            if item:
-                yield item
+        # while not self.evt_abort.is_set():
+        #     item = self._recv_next()
+        #     if item:
+        #         yield item
+        for frame in self.recv():
+            yield frame
 
     def send(self, data, fin=True, op=OP_TEXT, mask=True):
         if self.evt_abort.is_set() or not self.f:
