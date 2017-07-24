@@ -43,7 +43,7 @@ create a "Sever" class like this:
 
 ```python
 
-	from ws import ws_server_view
+	from flaskws import ws_server_view
 
 	@app.route('/ws/<int:some_id>')
 	@ws_server_view
